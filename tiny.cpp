@@ -244,26 +244,6 @@ void threads(int id){
         // }
     }
 }
-void orgin(){
-   int listenfd, connfd, port;
-    socklen_t clientlen;
-    struct sockaddr_in clientaddr;
-    signal(SIGPIPE, SIG_IGN); 
-    listenfd = Open_listenfd(1024,0);
-    int co = 0;
-    char buf[MAXLINE];
-    strcpy(buf,"hello");
-    
-    int id = 0;
-    while(1){
-        clientlen = sizeof(clientaddr);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        doit(connfd);
-        Close(connfd);
-        //printf("close:%d\n",connfd);
-    }
-    //printf("handle %d reqeusts\n",co);
-}
 void version1(){
     int listenfd, connfd, port;
     socklen_t clientlen;
