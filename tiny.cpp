@@ -3,7 +3,7 @@
 #include "sbuf.h"
 #include <sys/time.h>
 
-const int sbuf_size = 1;
+const int sbuf_size = 30;
 const int reactor_size = 10;
 sbuf_t sbuf[sbuf_size];
 void doit(int fd);
@@ -18,6 +18,84 @@ sem_t mu_read[reactor_size];
 fd_set sread[reactor_size];
 int fd_max[reactor_size];
 using namespace std;
+int mydoit(int id,int fd){
+    int is_static;
+    struct stat sbuf;
+    rio_t rio;
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char filename[MAXLINE], cgiargs[MAXLINE];
+    //初始化 rio 结构
+    Rio_readinitb(&rio, fd);
+    //读取http请求行
+    ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
+    //格式化存入 把该行拆分
+    printf("%s\n",buf);
+    if(readn == 0){
+        printf("%d close\n",fd);
+        P(&mu_read[id]);
+        FD_CLR(fd,&sread[id]);
+        V(&mu_read[id]);
+        Close(fd);
+        return -1;//客户端关闭连接
+    }
+    if(readn <= 10){
+        printf("readn:%d\n",readn);
+    }
+    //printf("readn=%d\nrequest line: %s\n",readn,buf);
+    sscanf(buf, "%s %s %s",method, uri, version);
+    //只能处理GET请求，如果不是GET请求的话返回错误
+    if(strcasecmp(method, "GET")){
+        clienterror(fd, method, "501", "Not Implemented","Tiny does not implement thid method");
+        P(&mu_read[id]);
+        FD_CLR(fd,&sread[id]);
+        V(&mu_read[id]);
+        Close(fd);
+        return -1;
+    }
+
+    //读取并忽略请求报头
+    read_requesthdrs(&rio);
+
+//    memset(filename,0,sizeof(filename));
+
+    //解析 URI
+    is_static = parse_uri(uri, filename, cgiargs);
+    return is_static;
+
+}
+void myserver(int fd){
+    int srcfd;
+    char *srcp, body[MAXBUF], filetype[MAXLINE],filename[MAXLINE];
+    int filesize = 107;
+    //printf("server static\n");
+    /* 发送 响应行 和 响应报头 */
+    get_filetype(filename, filetype);
+
+    sprintf(body, "HTTP/1.0 200 OK\r\n");
+    sprintf(body, "%sServer: Tiny Web Server\r\n",body);
+    sprintf(body, "%sConnection:close\r\n",body);
+    sprintf(body, "%sContent-length: %d\r\n",body, filesize);
+    sprintf(body, "%sContent-type: %s\r\n\r\n",body, filetype);
+    //Rio_writen(fd, body, strlen(body));
+    //printf("Response headers: \n%s",body);
+
+    /* 发送响应主体 即请求文件的内容 */
+    /* 只读方式发开filename文件，得到描述符*/
+    srcfd = Open(filename, O_RDONLY, 0);
+    /* 将srcfd 的前 filesize 个字节映射到一个从地址 srcp 开始的只读虚拟存储器区域
+     * 返回被映射区的指针 */
+    srcp = (char *)Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    /* 此后通过指针 srcp 操作，不需要这个描述符，所以关掉 */
+    Close(srcfd);
+   //printf("filesize %d\n",filesize);
+    int res = write(fd,srcp,filesize);
+   // Rio_writen(fd, srcp, filesize);
+  // printf("%d after res %d\n",this_thread::get_id(),res);
+    /* 释放映射的虚拟存储器区域 */
+    Munmap(srcp, filesize);
+    usleep(50000);
+
+}
 void doit(int id,int fd)
 {
     int is_static;
@@ -31,18 +109,14 @@ void doit(int id,int fd)
     //读取http请求行
     ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
     //格式化存入 把该行拆分
+    printf("%s\n",buf);
     if(readn == 0){
+        printf("%d close\n",fd);
+        P(&mu_read[id]);
+        FD_CLR(i,&sread[id]);
+        V(&mu_read[id]);
         Close(fd);
         return;//客户端关闭连接
-    }
-    if(readn <= 2){
-        if(buf[0] == 'q'){
-            P(&mu_read[id]);
-            FD_CLR(fd,&sread[id]);
-            V(&mu_read[id]);
-            Close(fd);
-            return;
-        }
     }
     if(readn <= 10){
         printf("readn:%d\n",readn);
@@ -174,7 +248,9 @@ void serve_static(int fd, char *filename, int filesize)
   // printf("%d after res %d\n",this_thread::get_id(),res);
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
+    printf("write \n");
     usleep(50000);
+
 }
 
 
@@ -248,7 +324,8 @@ void clienterror(int fd, char *cause, char *errnum,
 void worker(int id){
     while(1){
         int connfd = sbuf_remove(&sbuf[id]);
-        doit(connfd);
+        printf("%d doit %d\n",id,connfd);
+        myserver(connfd);
     }
 }
 void reactor(int id){
@@ -270,7 +347,11 @@ void reactor(int id){
         for(int i = 0;i<fmax+1;i++){
             if(FD_ISSET(i,&ready)){
               //  doit(i);
-                sbuf_insert(&sbuf[id],i);
+                printf("%d insert %d to sbuf\n",id,i);
+                int flag = mydoit(id,i);
+                if(flag == -1) continue;
+                if(flag)
+                  sbuf_insert(&sbuf[id],i);
             }
         }
     }
@@ -294,11 +375,15 @@ void version(){
         fd_max[i] = 0;
         FD_ZERO(&sread[i]);
     }
-    for(int i = 0;i<sbuf_size;i++){
-        sbuf_init(&(sbuf[i]),100);
+    for(int i = 0;i<reactor_size;i++){
+        sbuf_init(&(sbuf[i]),10);
     }
     for(int i = 0;i < reactor_size;i++){
         thread t(reactor,i%reactor_size);
+        t.detach();
+    }
+    for(int i = 0;i < concurrent_count;i++){
+        thread t(worker,i%reactor_size);
         t.detach();
     }
     fmax = listenfd;
@@ -324,7 +409,7 @@ void version(){
                     }
                 int id = connfd %reactor_size;
                 P(&mu_read[id]);
-                //printf("master insert %d to id: %d\n",connfd,id);
+                printf("master insert %d to id: %d\n",connfd,id);
                 FD_SET(connfd,&sread[id]);
                 if(connfd > fd_max[id]){
                     fd_max[id] = connfd;
@@ -336,8 +421,6 @@ void version(){
     }
     //printf("handle %d reqeusts\n",co);
 }
-int count[sbuf_size];
-int h[25];
 int main(int argc, char **argv)
 {
     version();
