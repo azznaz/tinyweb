@@ -4,7 +4,7 @@
 #include <sys/time.h>
 
 const int sbuf_size = 1;
-const int reactor_size = 5;
+const int reactor_size = 10;
 sbuf_t sbuf[sbuf_size];
 void doit(int fd);
 void serve_static(int fd, char *filename, int filesize);
@@ -18,7 +18,7 @@ sem_t mu_read[reactor_size];
 fd_set sread[reactor_size];
 int fd_max[reactor_size];
 using namespace std;
-void doit(int fd)
+void doit(int id,int fd)
 {
     int is_static;
     struct stat sbuf;
@@ -32,7 +32,20 @@ void doit(int fd)
     ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
     //格式化存入 把该行拆分
     if(readn == 0){
+        Close(fd);
         return;//客户端关闭连接
+    }
+    if(readn <= 2){
+        if(buf[0] == 'q'){
+            P(&mu_read[id]);
+            FD_CLR(fd,&sread[id]);
+            V(&mu_read[id]);
+            Close(fd);
+            return;
+        }
+    }
+    if(readn <= 10){
+        printf("readn:%d\n",readn);
     }
     //printf("readn=%d\nrequest line: %s\n",readn,buf);
     sscanf(buf, "%s %s %s",method, uri, version);
@@ -155,12 +168,13 @@ void serve_static(int fd, char *filename, int filesize)
     srcp = (char *)Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
     /* 此后通过指针 srcp 操作，不需要这个描述符，所以关掉 */
     Close(srcfd);
-   //printf("%d before filesize %d\n",this_thread::get_id(),filesize);
+   //printf("filesize %d\n",filesize);
     int res = write(fd,srcp,filesize);
    // Rio_writen(fd, srcp, filesize);
   // printf("%d after res %d\n",this_thread::get_id(),res);
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
+    usleep(50000);
 }
 
 
@@ -231,6 +245,12 @@ void clienterror(int fd, char *cause, char *errnum,
     Rio_writen(fd, buf, strlen(buf));
     Rio_writen(fd, body, strlen(body));
 }
+void worker(int id){
+    while(1){
+        int connfd = sbuf_remove(&sbuf[id]);
+        doit(connfd);
+    }
+}
 void reactor(int id){
     int co = 0;
     fd_set ready;
@@ -249,11 +269,8 @@ void reactor(int id){
             continue;
         for(int i = 0;i<fmax+1;i++){
             if(FD_ISSET(i,&ready)){
-                doit(i);
-                P(&mu_read[id]);
-                FD_CLR(i,&sread[id]);
-                V(&mu_read[id]);
-                Close(i);
+              //  doit(i);
+                sbuf_insert(&sbuf[id],i);
             }
         }
     }
@@ -277,9 +294,9 @@ void version(){
         fd_max[i] = 0;
         FD_ZERO(&sread[i]);
     }
-    // for(int i = 0;i<sbuf_size;i++){
-    //     sbuf_init(&(sbuf[i]),100);
-    // }
+    for(int i = 0;i<sbuf_size;i++){
+        sbuf_init(&(sbuf[i]),100);
+    }
     for(int i = 0;i < reactor_size;i++){
         thread t(reactor,i%reactor_size);
         t.detach();
