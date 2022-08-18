@@ -1,0 +1,8 @@
+{
+    "C_Cpp.errorSquiggles": "Disabled",
+    "files.associations": {
+        "csapp.h": "c",
+        "stddef.h": "c",
+        "thread": "cpp"
+    }
+}
