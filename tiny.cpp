@@ -4,6 +4,7 @@
 #include <sys/time.h>
 
 const int sbuf_size = 1;
+const int reactor_size = 5;
 sbuf_t sbuf[sbuf_size];
 void doit(int fd);
 void serve_static(int fd, char *filename, int filesize);
@@ -13,8 +14,9 @@ void get_filetype(char *filename,char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs);
 int parse_uri(char *uri, char *filename, char *cgiargs);
 int nrequest = 0;
-sem_t mu_request;
-
+sem_t mu_read[reactor_size];
+fd_set sread[reactor_size];
+int fd_max[reactor_size];
 using namespace std;
 void doit(int fd)
 {
@@ -229,60 +231,65 @@ void clienterror(int fd, char *cause, char *errnum,
     Rio_writen(fd, buf, strlen(buf));
     Rio_writen(fd, body, strlen(body));
 }
-void threads(int id){
+void reactor(int id){
     int co = 0;
+    fd_set ready;
+    struct timeval timeout;
+    int fmax,fd_num;
     while(1){
-        int connfd = sbuf_remove(&(sbuf[id]));
-        doit(connfd);
-        // P(&mu_request);
-        // ++nrequest;
-        // co = nrequest;
-        // V(&mu_request);
-        Close(connfd);
-        // if((co%10000) == 0){
-        //     printf("thread:%d handle %d requests\n",this_thread::get_id(),co);
-        // }
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 5000;
+        P(&mu_read[id]);
+        ready = sread[id];
+        fmax = fd_max[id];
+        V(&mu_read[id]);
+         if((fd_num = select(fmax+1,&ready,0,0,&timeout)) == -1)
+            break;
+        if(fd_num == 0)
+            continue;
+        for(int i = 0;i<fmax+1;i++){
+            if(FD_ISSET(i,&ready)){
+                doit(i);
+                P(&mu_read[id]);
+                FD_CLR(i,&sread[id]);
+                V(&mu_read[id]);
+                Close(i);
+            }
+        }
     }
 }
-void version1(){
+void version(){
     int listenfd, connfd, port;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
     fd_set ready,read;
     struct timeval timeout;
-    int fd_max,fd_num;
-    // if(argc != 2){
-    //     fprintf(stderr, "Usage: %s <port>\n",argv[0]);
-    //     exit(1);
-    // }
-    
-    //port = atoi(argv[1]);
+    int fd_num,fmax;
     signal(SIGPIPE, SIG_IGN); 
     listenfd = Open_listenfd(1024,1);
     FD_ZERO(&read);
     FD_SET(listenfd,&read);
-    //printf("11111\n");
-    int co = 0;
-    char buf[MAXLINE];
-    strcpy(buf,"hello");
     int concurrent_count = thread::hardware_concurrency();
     printf("hadrware_concurrent:%d\n",concurrent_count);
     concurrent_count = 25;
-    Sem_init(&mu_request,0,1);
-    for(int i = 0;i<sbuf_size;i++){
-        sbuf_init(&(sbuf[i]),100);
+    for(int i = 0;i<reactor_size;i++){
+        Sem_init(&mu_read[i],0,1);
+        fd_max[i] = 0;
+        FD_ZERO(&sread[i]);
     }
-    for(int i = 0;i < concurrent_count;i++){
-        thread t(threads,i%sbuf_size);
+    // for(int i = 0;i<sbuf_size;i++){
+    //     sbuf_init(&(sbuf[i]),100);
+    // }
+    for(int i = 0;i < reactor_size;i++){
+        thread t(reactor,i%reactor_size);
         t.detach();
     }
-    fd_max = listenfd;
-    int id = 0;
+    fmax = listenfd;
     while(1){
         ready = read;
-        timeout.tv_sec=0;
+        timeout.tv_sec=1;
         timeout.tv_usec=5000;
-        if((fd_num = select(fd_max+1,&ready,0,0,&timeout)) == -1)
+        if((fd_num = select(fmax+1,&ready,0,0,&timeout)) == -1)
             break;
         if(fd_num == 0)
             continue;
@@ -290,7 +297,6 @@ void version1(){
         if(FD_ISSET(listenfd,&ready)){
            clientlen = sizeof(clientaddr);
             while(1){
-                ++co;
                 connfd = Accept(listenfd,(SA *)&clientaddr,&clientlen);
                 if(connfd < 0){
                     if(errno == EWOULDBLOCK) break;
@@ -299,8 +305,15 @@ void version1(){
                         return;
                         }
                     }
-                    sbuf_insert(&(sbuf[connfd%sbuf_size]),connfd);
+                int id = connfd %reactor_size;
+                P(&mu_read[id]);
+                //printf("master insert %d to id: %d\n",connfd,id);
+                FD_SET(connfd,&sread[id]);
+                if(connfd > fd_max[id]){
+                    fd_max[id] = connfd;
                 }
+                V(&mu_read[id]);
+            }
         }
     
     }
@@ -310,5 +323,5 @@ int count[sbuf_size];
 int h[25];
 int main(int argc, char **argv)
 {
-    version1();
+    version();
 }
