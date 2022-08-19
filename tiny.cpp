@@ -18,6 +18,17 @@ sem_t mu_read[reactor_size];
 fd_set sread[reactor_size];
 int fd_max[reactor_size];
 using namespace std;
+int mydelay(){
+    int sum = 0;
+    int n = 20000000;
+    for(int i = 0 ;i<=n;i+=2){
+        if(i%3)
+         sum += i%10000;
+        else sum -= i%1000;
+    }
+    sum %= 10000;
+    return sum/10;
+}
 void doit(int id,int fd)
 {
     int is_static;
@@ -167,7 +178,8 @@ void serve_static(int fd, char *filename, int filesize)
   // printf("%d after res %d\n",this_thread::get_id(),res);
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
-    usleep(50000);
+    int x = mydelay();
+   
 }
 
 
