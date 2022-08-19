@@ -4,7 +4,7 @@
 #include <sys/time.h>
 
 const int sbuf_size = 1;
-const int reactor_size = 5;
+const int reactor_size = 3;
 sbuf_t sbuf[sbuf_size];
 void doit(int fd);
 void serve_static(int fd, char *filename, int filesize);
@@ -18,23 +18,29 @@ sem_t mu_read[reactor_size];
 fd_set sread[reactor_size];
 int fd_max[reactor_size];
 using namespace std;
-void doit(int fd)
+void doit(int id,int fd)
 {
     int is_static;
     struct stat sbuf;
     rio_t rio;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char filename[MAXLINE], cgiargs[MAXLINE];
-
+    buf[MAXLINE] = '\0';
     //初始化 rio 结构
     Rio_readinitb(&rio, fd);
     //读取http请求行
     ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
     //格式化存入 把该行拆分
+
+     //printf("readn=%d\nrequest line: %s\n",readn,buf);
     if(readn == 0){
+          P(&mu_read[id]);
+          FD_CLR(fd,&sread[id]);
+          V(&mu_read[id]);
+          Close(fd);
+          //printf("id:%d close %d\n",id,fd);
         return;//客户端关闭连接
     }
-    //printf("readn=%d\nrequest line: %s\n",readn,buf);
     sscanf(buf, "%s %s %s",method, uri, version);
     //只能处理GET请求，如果不是GET请求的话返回错误
     if(strcasecmp(method, "GET")){
@@ -144,7 +150,7 @@ void serve_static(int fd, char *filename, int filesize)
     sprintf(body, "%sConnection:close\r\n",body);
     sprintf(body, "%sContent-length: %d\r\n",body, filesize);
     sprintf(body, "%sContent-type: %s\r\n\r\n",body, filetype);
-    Rio_writen(fd, body, strlen(body));
+   // Rio_writen(fd, body, strlen(body));
     //printf("Response headers: \n%s",body);
 
     /* 发送响应主体 即请求文件的内容 */
@@ -161,6 +167,7 @@ void serve_static(int fd, char *filename, int filesize)
   // printf("%d after res %d\n",this_thread::get_id(),res);
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
+    usleep(50000);
 }
 
 
@@ -249,11 +256,7 @@ void reactor(int id){
             continue;
         for(int i = 0;i<fmax+1;i++){
             if(FD_ISSET(i,&ready)){
-                doit(i);
-                P(&mu_read[id]);
-                FD_CLR(i,&sread[id]);
-                V(&mu_read[id]);
-                Close(i);
+                doit(id,i);
             }
         }
     }
@@ -307,7 +310,7 @@ void version(){
                     }
                 int id = connfd %reactor_size;
                 P(&mu_read[id]);
-                //printf("master insert %d to id: %d\n",connfd,id);
+               // printf("master insert %d to id: %d\n",connfd,id);
                 FD_SET(connfd,&sread[id]);
                 if(connfd > fd_max[id]){
                     fd_max[id] = connfd;
