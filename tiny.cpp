@@ -29,9 +29,9 @@ int mydoit(int id,int fd){
     //读取http请求行
     ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
     //格式化存入 把该行拆分
-    printf("%s\n",buf);
+    //printf("%s\n",buf);
     if(readn == 0){
-        printf("%d close\n",fd);
+       // printf("%d close\n",fd);
         P(&mu_read[id]);
         FD_CLR(fd,&sread[id]);
         V(&mu_read[id]);
@@ -39,7 +39,7 @@ int mydoit(int id,int fd){
         return -1;//客户端关闭连接
     }
     if(readn <= 10){
-        printf("readn:%d\n",readn);
+       // printf("readn:%d\n",readn);
     }
     //printf("readn=%d\nrequest line: %s\n",readn,buf);
     sscanf(buf, "%s %s %s",method, uri, version);
@@ -67,6 +67,7 @@ void myserver(int fd){
     int srcfd;
     char *srcp, body[MAXBUF], filetype[MAXLINE],filename[MAXLINE];
     int filesize = 107;
+    strcpy(filename,"./home.html");
     //printf("server static\n");
     /* 发送 响应行 和 响应报头 */
     get_filetype(filename, filetype);
@@ -109,11 +110,11 @@ void doit(int id,int fd)
     //读取http请求行
     ssize_t readn = Rio_readlineb(&rio, buf, MAXLINE);
     //格式化存入 把该行拆分
-    printf("%s\n",buf);
+  //  printf("%s\n",buf);
     if(readn == 0){
-        printf("%d close\n",fd);
+        //printf("%d close\n",fd);
         P(&mu_read[id]);
-        FD_CLR(i,&sread[id]);
+        FD_CLR(fd,&sread[id]);
         V(&mu_read[id]);
         Close(fd);
         return;//客户端关闭连接
@@ -324,7 +325,7 @@ void clienterror(int fd, char *cause, char *errnum,
 void worker(int id){
     while(1){
         int connfd = sbuf_remove(&sbuf[id]);
-        printf("%d doit %d\n",id,connfd);
+       // printf("%d myserver %d\n",id,connfd);
         myserver(connfd);
     }
 }
@@ -347,7 +348,7 @@ void reactor(int id){
         for(int i = 0;i<fmax+1;i++){
             if(FD_ISSET(i,&ready)){
               //  doit(i);
-                printf("%d insert %d to sbuf\n",id,i);
+            //    printf("%d insert %d to sbuf\n",id,i);
                 int flag = mydoit(id,i);
                 if(flag == -1) continue;
                 if(flag)
@@ -409,7 +410,7 @@ void version(){
                     }
                 int id = connfd %reactor_size;
                 P(&mu_read[id]);
-                printf("master insert %d to id: %d\n",connfd,id);
+             //   printf("master insert %d to id: %d\n",connfd,id);
                 FD_SET(connfd,&sread[id]);
                 if(connfd > fd_max[id]){
                     fd_max[id] = connfd;
