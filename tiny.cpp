@@ -4,7 +4,7 @@
 #include <sys/time.h>
 
 const int sbuf_size = 30;
-const int reactor_size = 10;
+const int reactor_size = 3;
 sbuf_t sbuf[sbuf_size];
 void doit(int fd);
 void serve_static(int fd, char *filename, int filesize);
@@ -18,6 +18,17 @@ sem_t mu_read[reactor_size];
 fd_set sread[reactor_size];
 int fd_max[reactor_size];
 using namespace std;
+int mydelay(){
+    int sum = 0;
+    int n = 20000000;
+    for(int i = 0 ;i<=n;i+=2){
+        if(i%3)
+         sum += i%10000;
+        else sum -= i%1000;
+    }
+    sum %= 10000;
+    return sum/10;
+}
 int mydoit(int id,int fd){
     int is_static;
     struct stat sbuf;
@@ -94,7 +105,7 @@ void myserver(int fd){
   // printf("%d after res %d\n",this_thread::get_id(),res);
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
-    usleep(50000);
+   int x = mydelay();
 
 }
 void doit(int id,int fd)
@@ -120,7 +131,7 @@ void doit(int id,int fd)
         return;//客户端关闭连接
     }
     if(readn <= 10){
-        printf("readn:%d\n",readn);
+        //printf("readn:%d\n",readn);
     }
     //printf("readn=%d\nrequest line: %s\n",readn,buf);
     sscanf(buf, "%s %s %s",method, uri, version);
@@ -250,7 +261,8 @@ void serve_static(int fd, char *filename, int filesize)
     /* 释放映射的虚拟存储器区域 */
     Munmap(srcp, filesize);
     printf("write \n");
-    usleep(50000);
+    //usleep(50000);
+    int x = mydelay();
 
 }
 
